@@ -28,9 +28,13 @@ def load_points():
     """
     cur = source_conn.cursor()
     challenge_cur = challenge_conn.cursor()
+    challenge_cur.execute(" create temp table active_ids(external_id text);")
+    
     cur.execute("select id,version,ST_AsGeoJSON(geom) as geom from nodes where tags->'amenity' = 'restaurant' and not tags?'addr:street' and geom && ST_Buffer(ST_GeomFromText('POINT(-79.38238 43.6553)'), 1.0::float)")
     for place in cur.fetchall():
         task_ext_id = "%s_%s" % ( place[0], place[1])
+        challenge_cur.execute("insert into active_ids (external_id) values(%s)"
+                              , [ task_ext_id])
         # 
         # Does this task exist?
         challenge_cur.execute("select task_id from task where external_id=%s "
@@ -47,6 +51,14 @@ def load_points():
                                   "                  , %s "
                                   "                  , %s )",
                                   [1 , 1 , place[2],task_ext_id])
+    #
+    # mark any ids for this challenge that are active as expired
+    # if they no longer show up in the OSM database query
+    challenge_cur.execute("update task set state_id=2 where "
+                          " challenge_id=1 "
+                          " and state_id=1 "
+                          " and external_id not in "
+                          "     (select * FROM active_ids)")
     challenge_cur.close()
     cur.close()
     challenge_conn.commit()
